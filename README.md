@@ -27,7 +27,7 @@ pip install colorama tabulate
 ```
 
 
-##Usage
+## Usage
 
 run the scanner:
 
@@ -51,15 +51,12 @@ Scanned 1000/1000 ports...
 Scan complete in 2.10s
 
 Scan Summary:
-╒══════════╤══════════╕
-│ Ports    │ Status   │
-╞══════════╪══════════╡
-│ 631      │ Open     │
-├──────────┼──────────┤
-│ 1-630    │ Closed   │
-├──────────┼──────────┤
-│ 632-1000 │ Closed   │
-╘══════════╧══════════╛
+| Ports       | Status   |
+|------------|---------|
+| 631        | Open    |
+| 1-630      | Closed  |
+| 632-1000   | Closed  |
+
 
 Totals: Open=1, Closed=999, Filtered=0
 Saved results -> scans/scan_<target>_2025.json
