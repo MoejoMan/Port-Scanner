@@ -1,67 +1,77 @@
 # Port-Scanner
-A python port scanner with open, closed, and filtered port detection, banner grabbing, JSON outputs, using threaded scanning with a summary table. Note: This tool is intended for educational purposes and testing on networks you own or have permission to scan. Unauthorized scanning of external networks may be illegal.
+
+A fast, multi-threaded port scanner with GUI, profile management, and scheduling. Detects open, closed, and filtered ports with banner grabbing and detailed reporting.
+
+**Note:** This tool is for educational purposes only. Do not scan networks or devices without explicit permission. Unauthorized scanning may be illegal.
 
 ## Features
 
-- Scan common port categories:  
-  - Web (HTTP, HTTPS, etc.)  
-  - Database (MySQL, PostgreSQL, MSSQL)  
-  - Email (SMTP, POP3, IMAP)  
-  - Admin/Other (SSH, RDP, VNC)  
-- Detect **Open**, **Closed**, and **Filtered** ports  
-- **Banner grabbing** for open ports  
-- Color-coded **scan summary table**  
-- Save results as **JSON**  
-- Multi-threaded scanning for **speed**
+- **Multi-threaded scanning** - 200 concurrent threads for speed
+- **Port detection** - Identifies open, closed, and filtered ports
+- **Banner grabbing** - Service identification on open ports
+- **Pre-set categories:**
+  - Web (HTTP, HTTPS, HTTP-alt)
+  - Database (MySQL, PostgreSQL, MSSQL)
+  - Email (SMTP, POP3, IMAP)
+  - Admin (SSH, RDP, VNC)
+- **Custom port ranges** - Scan any range you specify
+- **PyQt5 GUI** - User-friendly interface (in development)
+- **Save profiles** - Store and reuse scan configurations
+- **Scheduled scans** - Run scans at specific intervals (planned)
+- **JSON results** - Export detailed scan data
 
-## Requirements (if you want the summary table, which is useful)
+## Requirements
 
-- Python 3.8+  
-- [colorama](https://pypi.org/project/colorama/)  
-- [tabulate](https://pypi.org/project/tabulate/)  
+- Python 3.8+
 
 Install dependencies:
 
 ```bash
-pip install colorama tabulate
+pip install -r requirements.txt
 ```
 
+## Project Structure
 
-## Usage
+```
+Port-Scanner/
+├── portscan.py          # Core scanner (PortScanner class)
+├── profiles.py          # Profile management (SQLite)
+├── main.py              # PyQt5 GUI (in development)
+├── data.db              # Profile storage
+├── scans/               # JSON scan results
+└── requirements.txt
+```
 
-run the scanner:
+## Usage (Current - CLI)
 
-python portscan.py <target_ip_or_hostname>
+```python
+from portscan import PortScanner
 
-You will be prompted with preset ranges of ports to scan, choose from a category.
-if you wish to do a custom range, input a custom range into the fields.
+# Create scanner
+scanner = PortScanner(timeout=0.6, threads=200)
 
+# Set progress callback (optional)
+scanner.set_progress_callback(lambda scanned, total: print(f"{scanned}/{total}"))
 
+# Run scan
+results = scanner.scan(target="192.168.1.1", ports=[80, 443, 22, 3306])
 
-## Example output
-Start port: 1
-End port: 1000
-Target (ip or hostname): <your target>
-Scanning ports 1-1000
-Scanned 50/1000 ports...
-Scanned 100/1000 ports...
-...
-Scanned 1000/1000 ports...
+# Check results
+if results["success"]:
+    summary = results["results"]["summary"]
+    print(f"Open ports: {summary['total_open']}")
+else:
+    print(f"Error: {results['error']}")
+```
 
-Scan complete in 2.10s
+## Planned Features
 
-Scan Summary:
-| Ports       | Status   |
-|------------|---------|
-| 631        | Open    |
-| 1-630      | Closed  |
-| 632-1000   | Closed  |
-
-
-Totals: Open=1, Closed=999, Filtered=0
-Saved results -> scans/scan_<target>_2025.json
-
+- [ ] PyQt5 GUI interface
+- [ ] Save/load scan profiles
+- [ ] Scheduled scans with APScheduler
+- [ ] Visual dashboard with charts
+- [ ] Scan history and comparisons
 
 ## DISCLAIMER
 
-This tool is for educational purposes only. Do not scan networks or devices without explicit permission. Unauthorized scanning may be illegal.
+This tool is for educational purposes only. Do not scan networks or devices without explicit permission. Unauthorized scanning may be illegal. The author assumes no liability for misuse.
