@@ -1,4 +1,4 @@
-# Port-Scanner
+# Radar Port Scanner
 
 A fast, multi-threaded port scanner with GUI, profile management, and scheduling. Detects open, closed, and filtered ports with banner grabbing and detailed reporting.
 
@@ -33,7 +33,7 @@ pip install -r requirements.txt
 ## Project Structure
 
 ```
-Port-Scanner/
+Radar/
 ├── portscan.py          # Core scanner (PortScanner class)
 ├── profiles.py          # Profile management (SQLite)
 ├── main.py              # PyQt5 GUI (in development)
