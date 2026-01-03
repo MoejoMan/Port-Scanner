@@ -1,173 +1,178 @@
 import socket
-import sys
-import json
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
-from pathlib import Path
-from tabulate import tabulate
-from colorama import init, Fore
+from typing import Dict, List, Callable, Optional
 
-init(autoreset=True)
 
-WEB_PORTS = {80: "HTTP", 443: "HTTPS", 8080: "HTTP-alt"}
-DB_PORTS = {3306: "MySQL", 5432: "PostgreSQL", 1433: "MSSQL"}
-EMAIL_PORTS = {25: "SMTP", 110: "POP3", 143: "IMAP"}
-ADMIN_PORTS = {22: "SSH", 3389: "RDP", 5900: "VNC"}
-
-print("Select port category to scan:")
-print("1 - Web ports")
-print("2 - Database ports")
-print("3 - Email ports")
-print("4 - Admin/Other ports")
-
-choice = input("Enter choice (1-4): ")
-
-if choice == "1":
-    ports_to_scan = WEB_PORTS.keys()
-elif choice == "2":
-    ports_to_scan = DB_PORTS.keys()
-elif choice == "3":
-    ports_to_scan = EMAIL_PORTS.keys()
-elif choice == "4":
-    ports_to_scan = ADMIN_PORTS.keys()
-else:
-    print("Invalid choice, defaulting to custom range")
-    START_PORT = int(input("Start port: "))
-    END_PORT = int(input("End port: "))
-    ports_to_scan = range(START_PORT, END_PORT + 1)
-
-TARGET = sys.argv[1] if len(sys.argv) > 1 else input("Target (ip or hostname): ")
-ports = ports_to_scan
-
-TIMEOUT = 0.6
-THREADS = 200
-OUTPUT_DIR = Path("scans")
-OUTPUT_DIR.mkdir(exist_ok=True)
-
-def scan_port(host, port):
-    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    s.settimeout(TIMEOUT)
-    try:
-        res = s.connect_ex((host, port))
-        s.close()
-        if res == 0:
-            return {"port": port, "status": "open"}
-        else:
-            return {"port": port, "status": "closed"}
-    except Exception:
-        return {"port": port, "status": "filtered"}
-
-def grab_banner(host, port):
-    try:
-        s = socket.socket()
-        s.settimeout(2)
-        s.connect((host, port))
-        banner = s.recv(1024).decode().strip()
-        s.close()
-        return banner
-    except:
-        return None
-
-def resolve_host(host):
-    try:
-        return socket.gethostbyname(host)
-    except Exception:
-        return None
-
-def compress_ranges(ports_list):
-    """Compress consecutive ports with same status into ranges"""
-    if not ports_list:
-        return []
-    ports_list = sorted(ports_list, key=lambda x: x["port"])
-    compressed = []
-    start = prev = ports_list[0]["port"]
-    for p in ports_list[1:]:
-        if p["port"] == prev + 1:
-            prev = p["port"]
-        else:
-            compressed.append(f"{start}-{prev}" if start != prev else str(start))
-            start = prev = p["port"]
-    compressed.append(f"{start}-{prev}" if start != prev else str(start))
-    return compressed
-
-def write_output(target, ip, open_ports, closed_ports, filtered_ports, duration):
-    now = datetime.utcnow().strftime("%Y%m%dT%H%M%SZ")
-    summary = {
-        "target": target,
-        "ip": ip,
-        "timestamp_utc": now,
-        "duration_s": duration,
-        "open_ports": sorted(open_ports, key=lambda x: x["port"]),
-        "closed_ports": sorted(closed_ports, key=lambda x: x["port"]),
-        "filtered_ports": sorted(filtered_ports, key=lambda x: x["port"])
+class PortScanner:
+    """Multi-threaded port scanner with progress callbacks"""
+    
+    # Port categories as class constants
+    PORT_CATEGORIES = {
+        "web": {80: "HTTP", 443: "HTTPS", 8080: "HTTP-alt"},
+        "database": {3306: "MySQL", 5432: "PostgreSQL", 1433: "MSSQL"},
+        "email": {25: "SMTP", 110: "POP3", 143: "IMAP"},
+        "admin": {22: "SSH", 3389: "RDP", 5900: "VNC"}
     }
-    out_file = OUTPUT_DIR / f"scan_{target.replace('/','_')}_{now}.json"
-    with open(out_file, "w") as f:
-        json.dump(summary, f, indent=2)
-    print(f"Saved results -> {out_file}")
-
-def main():
-    ip = resolve_host(TARGET)
-    if not ip:
-        print(f"Could not resolve {TARGET}")
-        return
-
-    print(f"Scanning {TARGET} ({ip}) ports {min(ports)}-{max(ports)}")
-    start = datetime.utcnow()
-
-    open_ports, closed_ports, filtered_ports = [], [], []
-    total_ports = len(ports)
-    scanned_count = 0
-
-    with ThreadPoolExecutor(max_workers=THREADS) as ex:
-        futures = {ex.submit(scan_port, ip, p): p for p in ports}
-
-        for fut in as_completed(futures):
-            scanned_count += 1
-            if scanned_count % 50 == 0 or scanned_count == total_ports:
-                print(f"Scanned {scanned_count}/{total_ports} ports...")
-
-            try:
-                res = fut.result()
-            except Exception:
-                res = None
-
-            if res:
-                status = res["status"]
-                if status == "open":
-                    port_num = res["port"]
-                    banner = grab_banner(ip, port_num)
-                    open_ports.append({"port": port_num, "status": status, "banner": banner})
-
-                elif status == "closed":
-                    closed_ports.append(res)
-                else:
-                    filtered_ports.append(res)
-
-    duration = (datetime.utcnow() - start).total_seconds()
-    print(f"\nScan complete in {duration:.2f}s\n")
-
-    summary_table = []
-
-    for category, ports_list in [("Open", open_ports), ("Closed", closed_ports), ("Filtered", filtered_ports)]:
-        color = Fore.GREEN if category == "Open" else Fore.RED if category == "Closed" else Fore.YELLOW
+    
+    def __init__(self, timeout: float = 0.6, threads: int = 200):
+        """
+        Initialize scanner
         
-        if category == "Open":
-            for p in ports_list:
-                banner = p.get("banner")
-                display = f"{p['port']} ({banner})" if banner else str(p["port"])
-                summary_table.append([color + display, color + category])
+        Args:
+            timeout: Socket timeout in seconds
+            threads: Number of concurrent threads
+        """
+        self.timeout = timeout
+        self.threads = threads
+        self.progress_callback: Optional[Callable] = None
+    
+    def set_progress_callback(self, callback: Callable[[int, int], None]) -> None:
+        """
+        Set callback for progress updates
+        
+        Args:
+            callback: Function that takes (scanned_count, total_count)
+        """
+        self.progress_callback = callback
+    
+    def scan(self, target: str, ports: List[int]) -> Dict:
+        """
+        Scan target for open ports
+        
+        Args:
+            target: IP address or hostname
+            ports: List of port numbers to scan
+            
+        Returns:
+            Dict with keys:
+                - success: bool
+                - error: str or None
+                - results: Dict with scan data or None
+        """
+        # Resolve hostname to IP
+        ip = self._resolve_host(target)
+        if not ip:
+            return {
+                "success": False,
+                "error": f"Could not resolve {target}",
+                "results": None
+            }
+        
+        # Run scan
+        start_time = datetime.utcnow()
+        open_ports, closed_ports, filtered_ports = [], [], []
+        total_ports = len(ports)
+        scanned_count = 0
+        
+        with ThreadPoolExecutor(max_workers=self.threads) as executor:
+            futures = {executor.submit(self._scan_port, ip, p): p for p in ports}
+            
+            for future in as_completed(futures):
+                scanned_count += 1
+                
+                # Emit progress
+                if self.progress_callback:
+                    self.progress_callback(scanned_count, total_ports)
+                
+                try:
+                    result = future.result()
+                except Exception:
+                    result = None
+                
+                if result:
+                    status = result["status"]
+                    if status == "open":
+                        port_num = result["port"]
+                        banner = self._grab_banner(ip, port_num)
+                        open_ports.append({
+                            "port": port_num,
+                            "status": status,
+                            "banner": banner
+                        })
+                    elif status == "closed":
+                        closed_ports.append(result)
+                    else:
+                        filtered_ports.append(result)
+        
+        duration = (datetime.utcnow() - start_time).total_seconds()
+        
+        # Return clean data
+        return {
+            "success": True,
+            "error": None,
+            "results": {
+                "target": target,
+                "ip": ip,
+                "timestamp_utc": start_time.strftime("%Y%m%dT%H%M%SZ"),
+                "duration_s": duration,
+                "open_ports": sorted(open_ports, key=lambda x: x["port"]),
+                "closed_ports": sorted(closed_ports, key=lambda x: x["port"]),
+                "filtered_ports": sorted(filtered_ports, key=lambda x: x["port"]),
+                "summary": {
+                    "total_open": len(open_ports),
+                    "total_closed": len(closed_ports),
+                    "total_filtered": len(filtered_ports)
+                }
+            }
+        }
+    
+    def _scan_port(self, host: str, port: int) -> Dict:
+        """Scan a single port"""
+        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        s.settimeout(self.timeout)
+        try:
+            res = s.connect_ex((host, port))
+            s.close()
+            if res == 0:
+                return {"port": port, "status": "open"}
+            else:
+                return {"port": port, "status": "closed"}
+        except Exception:
+            return {"port": port, "status": "filtered"}
+    
+    def _grab_banner(self, host: str, port: int) -> Optional[str]:
+        """Try to grab service banner from open port"""
+        try:
+            s = socket.socket()
+            s.settimeout(2)
+            s.connect((host, port))
+            banner = s.recv(1024).decode().strip()
+            s.close()
+            return banner if banner else None
+        except Exception:
+            return None
+    
+    def _resolve_host(self, host: str) -> Optional[str]:
+        """Resolve hostname to IP address"""
+        try:
+            return socket.gethostbyname(host)
+        except Exception:
+            return None
+    
+    @staticmethod
+    def compress_port_ranges(ports_list: List[Dict]) -> List[str]:
+        """Compress consecutive ports into ranges for display"""
+        if not ports_list:
+            return []
+        
+        ports_list = sorted(ports_list, key=lambda x: x["port"])
+        compressed = []
+        start = prev = ports_list[0]["port"]
+        
+        for p in ports_list[1:]:
+            if p["port"] == prev + 1:
+                prev = p["port"]
+            else:
+                if start != prev:
+                    compressed.append(f"{start}-{prev}")
+                else:
+                    compressed.append(str(start))
+                start = prev = p["port"]
+        
+        if start != prev:
+            compressed.append(f"{start}-{prev}")
         else:
-            compressed = compress_ranges(ports_list)
-            for entry in compressed:
-                summary_table.append([color + entry, color + category])
-
-
-    print("Scan Summary:")
-    print(tabulate(summary_table, headers=["Ports", "Status"], tablefmt="fancy_grid"))
-    print(f"\nTotals: Open={len(open_ports)}, Closed={len(closed_ports)}, Filtered={len(filtered_ports)}")
-
-    write_output(TARGET, ip, open_ports, closed_ports, filtered_ports, duration)
-
-if __name__ == "__main__":
-    main()
+            compressed.append(str(start))
+        
+        return compressed
